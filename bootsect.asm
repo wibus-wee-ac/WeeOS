@@ -1,30 +1,46 @@
-[org 0x7C00]
-mov bp, 0x8000 ; 把栈顶设成0x8000，这样不与BIOS相干
-mov sp, bp     ; 同上
-mov bx, 0x9000 ; es:bx == 0x0000:0x9000 == 0x09000
+[org 0x7c00]
+KERNEL_OFFSET equ 0x1000 ; 定义常量，这个常量是内核的位置
 
-; 现在我们要设置disk_load参数
-mov dh, 2 ; 读取两个扇区
-; 此处不用设置dl，BIOS已经帮我们设置过了
-call disk_load ; 调用
+    mov [BOOT_DRIVE], dl ; BIOS会自动把磁盘编号设置到dl。我们在下面间一个常量，先存起来，因为dl可能会被覆盖
+    mov bp, 0x9000
+    mov sp, bp
 
-mov dx, [0x9000] ; 获取第一扇区
-call print_hex
-call print_nl
+    mov bx, MSG_REAL_MODE ; 实模式打印
+    call print
+    call print_nl
 
-mov dx, [0x9000 + 512] ; 获取第二扇区（注意偏移地址，跟下面数据对应）
-call print_hex
+    call load_kernel  ; 加载内核
+    call switch_to_pm ; 切PM
 
-jmp $
-
-%include "print_hex.asm"
 %include "disk.asm"
+%include "gdt.asm"
+%include "print.asm"
+%include "switch_pm.asm"
+%include "32bit-print.asm"
+
+[bits 16]
+load_kernel:
+    mov bx, MSG_LOAD_KERNEL
+    call print
+    call print_nl
+
+    mov bx, KERNEL_OFFSET ; 读取到内核偏移地址
+    mov dh, 2
+    mov dl, [BOOT_DRIVE]
+    call disk_load
+    ret
+
+[bits 32]
+BEGIN_PM:
+    mov ebx, MSG_PROT_MODE
+    call print_string_pm
+    call KERNEL_OFFSET ; 执行内核代码
+    jmp $
+
+BOOT_DRIVE db 0
+MSG_REAL_MODE db "Started in 16-bit Real Mode", 0
+MSG_PROT_MODE db "Landed in 32-bit Protected Mode", 0
+MSG_LOAD_KERNEL db "Loading kernel into memory", 0
 
 times 510 - ($-$$) db 0
 dw 0xAA55
-
-; 上面是bs（第一个扇区）
-times 256 dw 0x1234 ; 第2
-times 256 dw 0x5678 ; 第3
-; 上面的第二第三也不一定，因为有的磁盘一个扇区512，现在有的4096
-; …………
